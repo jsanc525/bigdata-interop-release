@@ -105,7 +105,7 @@
     <google.api-bigquery.version>v2-rev377-${google.api.version}</google.api-bigquery.version>
     <google.api-storage.version>v1-rev124-${google.api.version}</google.api-storage.version>
     <google.auto-value.version>1.6</google.auto-value.version>
-    <google.findbugs.version>3.0.2</google.findbugs.version>
+    <google.findbugs.version>3.0.0</google.findbugs.version>
     <google.guava.version>24.1-jre</google.guava.version>
     <google.truth.version>0.40</google.truth.version>
     <hadoop.one.version>1.2.1</hadoop.one.version>
