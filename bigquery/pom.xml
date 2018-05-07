@@ -32,7 +32,6 @@
   </description>
 
   <artifactId>bigquery-connector</artifactId>
-  <version>0.13.0-SNAPSHOT-${hadoop.identifier}</version>
 
   <profiles>
     <profile>
@@ -191,7 +190,7 @@
     <dependency>
       <groupId>com.google.cloud.bigdataoss</groupId>
       <artifactId>util-hadoop</artifactId>
-      <version>${bigdataoss.version}-${hadoop.identifier}</version>
+      <version>${bigdataoss.version}</version>
     </dependency>
     <dependency>
       <groupId>com.google.cloud.bigdataoss</groupId>
@@ -203,12 +202,12 @@
     <dependency>
       <groupId>com.google.cloud.bigdataoss</groupId>
       <artifactId>gcs-connector</artifactId>
-      <version>${bigdataoss.version}-${hadoop.identifier}</version>
+      <version>${bigdataoss.version}</version>
     </dependency>
     <dependency>
       <groupId>com.google.cloud.bigdataoss</groupId>
       <artifactId>gcs-connector</artifactId>
-      <version>${bigdataoss.version}-${hadoop.identifier}</version>
+      <version>${bigdataoss.version}</version>
       <classifier>tests</classifier>
       <scope>test</scope>
     </dependency>

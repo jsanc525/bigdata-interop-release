@@ -27,7 +27,6 @@
   </parent>
 
   <artifactId>util-hadoop</artifactId>
-  <version>1.9.0-SNAPSHOT-${hadoop.identifier}</version>
 
   <profiles>
     <profile>
