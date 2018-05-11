@@ -102,14 +102,15 @@
     <apache.httpcomponents.version>4.0.1</apache.httpcomponents.version>
 
     <google.api.version>1.23.0</google.api.version>
-    <google.api-bigquery.version>v2-rev377-${google.api.version}</google.api-bigquery.version>
-    <google.api-storage.version>v1-rev124-${google.api.version}</google.api-storage.version>
+    <google.api-bigquery.version>v2-rev387-${google.api.version}</google.api-bigquery.version>
+    <google.api-storage.version>v1-rev129-${google.api.version}</google.api-storage.version>
     <google.auto-value.version>1.6</google.auto-value.version>
     <google.findbugs.version>3.0.0</google.findbugs.version>
-    <google.guava.version>24.1-jre</google.guava.version>
+    <google.guava.version>25.0-jre</google.guava.version>
     <google.truth.version>0.40</google.truth.version>
     <hadoop.one.version>1.2.1</hadoop.one.version>
     <hadoop.two.version>2.8.3</hadoop.two.version>
+    <hadoop.three.version>3.1.0</hadoop.three.version>
     <hamcrest.version>1.3</hamcrest.version>
     <joda-time.version>2.9.9</joda-time.version>
     <junit.version>4.13-SNAPSHOT</junit.version>
@@ -137,6 +138,15 @@
       <id>hadoop2</id>
       <properties>
         <hadoop.identifier>hadoop2</hadoop.identifier>
+      </properties>
+      <activation>
+        <activeByDefault>true</activeByDefault>
+      </activation>
+    </profile>
+    <profile>
+      <id>hadoop3</id>
+      <properties>
+        <hadoop.identifier>hadoop3</hadoop.identifier>
       </properties>
     </profile>
     <profile>
@@ -357,7 +367,7 @@
       </dependency>
 
       <!-- Hadoop 1 version specific dependencies -->
-      <!-- These should only be referenced from *-hadoop1.pom.xml POMS -->
+      <!-- These should only be referenced from *-hadoop1 jars -->
       <dependency>
         <groupId>org.apache.hadoop</groupId>
         <artifactId>hadoop-core</artifactId>
@@ -372,7 +382,7 @@
       </dependency>
 
       <!-- Hadoop 2 version specific dependencies -->
-      <!-- These should only be referenced from *-hadoop2.pom.xml POMS -->
+      <!-- These should only be referenced from *-hadoop2 jars -->
       <dependency>
         <groupId>org.apache.hadoop</groupId>
         <artifactId>hadoop-common</artifactId>
@@ -390,6 +400,28 @@
         <groupId>org.apache.hadoop</groupId>
         <artifactId>hadoop-mapreduce-client-core</artifactId>
         <version>${hadoop.two.version}</version>
+        <scope>provided</scope>
+      </dependency>
+
+      <!-- Hadoop 3 version specific dependencies -->
+      <!-- These should only be referenced from *-hadoop3 jars -->
+      <dependency>
+        <groupId>org.apache.hadoop</groupId>
+        <artifactId>hadoop-common</artifactId>
+        <version>${hadoop.three.version}</version>
+        <scope>provided</scope>
+      </dependency>
+      <dependency>
+        <groupId>org.apache.hadoop</groupId>
+        <artifactId>hadoop-common</artifactId>
+        <version>${hadoop.three.version}</version>
+        <classifier>tests</classifier>
+        <scope>test</scope>
+      </dependency>
+      <dependency>
+        <groupId>org.apache.hadoop</groupId>
+        <artifactId>hadoop-mapreduce-client-core</artifactId>
+        <version>${hadoop.three.version}</version>
         <scope>provided</scope>
       </dependency>
     </dependencies>
@@ -449,6 +481,11 @@
         <plugin>
           <artifactId>maven-shade-plugin</artifactId>
           <version>3.1.1</version>
+        </plugin>
+        <plugin>
+          <groupId>org.codehaus.mojo</groupId>
+          <artifactId>build-helper-maven-plugin</artifactId>
+          <version>3.0.0</version>
         </plugin>
       </plugins>
     </pluginManagement>
