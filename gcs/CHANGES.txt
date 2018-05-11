@@ -17,9 +17,14 @@
 
        fs.gs.max.requests.per.batch (default: 30)
 
-  5. Hadoop 3 build compatibility.
+  5. Support Hadoop 3.
 
   6. Change Maven project structure to be better compatible with IDEs.
+
+  7. Delete deprecated `GoogleHadoopGlobalRootedFileSystem`.
+
+  8. Fix thread leaks that were occurring when YARN log aggregation uploaded
+     logs to GCS.
 
 
 1.8.1 - 2018-03-29
