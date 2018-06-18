@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright 2017 Google LLC
  *
  *  Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
@@ -17,14 +17,14 @@ import static org.hamcrest.Matchers.is;
 import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertThrows;
 
-import com.google.api.services.bigquery.model.TableFieldSchema;
 import com.google.api.services.bigquery.model.TableReference;
-import com.google.api.services.bigquery.model.TableSchema;
 import com.google.cloud.hadoop.fs.gcs.InMemoryGoogleHadoopFileSystem;
 import com.google.cloud.hadoop.io.bigquery.BigQueryConfiguration;
 import com.google.cloud.hadoop.io.bigquery.BigQueryFileFormat;
 import com.google.common.collect.ImmutableList;
+import com.google.common.truth.Truth;
 import java.io.IOException;
+import java.util.Optional;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.mapreduce.JobID;
@@ -39,6 +39,8 @@ import org.mockito.MockitoAnnotations;
 
 @RunWith(JUnit4.class)
 public class BigQueryOutputConfigurationTest {
+  /** Default projectId for the configuration. */
+  private static final String DEFAULT_PROJECT_ID = "google.com:my-project";
 
   /** Sample projectId for the configuration. */
   private static final String TEST_PROJECT_ID = "domain:project";
@@ -48,6 +50,14 @@ public class BigQueryOutputConfigurationTest {
 
   /** Sample tableId for the configuration. */
   private static final String TEST_TABLE_ID = "table";
+
+  /** Qualified table ID. */
+  private static final String QUALIFIED_TABLE_ID =
+      String.format("%s:%s.%s", TEST_PROJECT_ID, TEST_DATASET_ID, TEST_TABLE_ID);
+
+  /** Qualified table ID. */
+  private static final String QUALIFIED_TABLE_ID_WITHOUT_PROJECT =
+      String.format("%s.%s", TEST_DATASET_ID, TEST_TABLE_ID);
 
   /** Sample table reference. */
   private static final TableReference TEST_TABLE_REF =
@@ -68,12 +78,12 @@ public class BigQueryOutputConfigurationTest {
   private static final Class<? extends FileOutputFormat> TEST_OUTPUT_CLASS = TextOutputFormat.class;
 
   /** Sample table schema used for output. */
-  private static final TableSchema TEST_TABLE_SCHEMA =
-      new TableSchema()
+  private static final BigQueryTableSchema TEST_TABLE_SCHEMA =
+      new BigQueryTableSchema()
           .setFields(
               ImmutableList.of(
-                  new TableFieldSchema().setName("A").setType("STRING"),
-                  new TableFieldSchema().setName("B").setType("INTEGER")));
+                  new BigQueryTableFieldSchema().setName("A").setType("STRING"),
+                  new BigQueryTableFieldSchema().setName("B").setType("INTEGER")));
 
   /** Sample expected serialized version of TEST_TABLE_SCHEMA. */
   private static final String TEST_TABLE_SCHEMA_STRING =
@@ -105,9 +115,7 @@ public class BigQueryOutputConfigurationTest {
   public void testConfigure() throws IOException {
     BigQueryOutputConfiguration.configure(
         conf,
-        TEST_PROJECT_ID,
-        TEST_DATASET_ID,
-        TEST_TABLE_ID,
+        QUALIFIED_TABLE_ID,
         TEST_TABLE_SCHEMA,
         TEST_OUTPUT_PATH_STRING,
         TEST_FILE_FORMAT,
@@ -125,6 +133,47 @@ public class BigQueryOutputConfigurationTest {
         BigQueryOutputConfiguration.getGcsOutputPath(conf).toString(), is(TEST_OUTPUT_PATH_STRING));
   }
 
+  /** Test the configure function correctly sets the configuration keys. */
+  @Test
+  public void testConfigureWithDefaultProject() throws IOException {
+    conf.set(BigQueryConfiguration.PROJECT_ID_KEY, DEFAULT_PROJECT_ID);
+    BigQueryOutputConfiguration.configure(
+        conf,
+        QUALIFIED_TABLE_ID_WITHOUT_PROJECT,
+        TEST_TABLE_SCHEMA,
+        TEST_OUTPUT_PATH_STRING,
+        TEST_FILE_FORMAT,
+        TEST_OUTPUT_CLASS);
+
+    assertThat(conf.get(BigQueryConfiguration.OUTPUT_PROJECT_ID_KEY), is(DEFAULT_PROJECT_ID));
+    assertThat(conf.get(BigQueryConfiguration.OUTPUT_DATASET_ID_KEY), is(TEST_DATASET_ID));
+    assertThat(conf.get(BigQueryConfiguration.OUTPUT_TABLE_ID_KEY), is(TEST_TABLE_ID));
+    assertThat(conf.get(BigQueryConfiguration.OUTPUT_FILE_FORMAT_KEY), is(TEST_FILE_FORMAT.name()));
+    assertThat(
+        conf.get(BigQueryConfiguration.OUTPUT_FORMAT_CLASS_KEY), is(TEST_OUTPUT_CLASS.getName()));
+    assertThat(
+        conf.get(BigQueryConfiguration.OUTPUT_TABLE_SCHEMA_KEY), is(TEST_TABLE_SCHEMA_STRING));
+    assertThat(
+        BigQueryOutputConfiguration.getGcsOutputPath(conf).toString(), is(TEST_OUTPUT_PATH_STRING));
+  }
+
+  /** Test the configure function correctly sets the configuration keys. */
+  @Test
+  public void testConfigureWithAutoSchema() throws IOException {
+    BigQueryOutputConfiguration.configureWithAutoSchema(
+        conf, QUALIFIED_TABLE_ID, TEST_OUTPUT_PATH_STRING, TEST_FILE_FORMAT, TEST_OUTPUT_CLASS);
+
+    assertThat(conf.get(BigQueryConfiguration.OUTPUT_PROJECT_ID_KEY), is(TEST_PROJECT_ID));
+    assertThat(conf.get(BigQueryConfiguration.OUTPUT_DATASET_ID_KEY), is(TEST_DATASET_ID));
+    assertThat(conf.get(BigQueryConfiguration.OUTPUT_TABLE_ID_KEY), is(TEST_TABLE_ID));
+    assertThat(conf.get(BigQueryConfiguration.OUTPUT_FILE_FORMAT_KEY), is(TEST_FILE_FORMAT.name()));
+    assertThat(
+        conf.get(BigQueryConfiguration.OUTPUT_FORMAT_CLASS_KEY), is(TEST_OUTPUT_CLASS.getName()));
+    Truth.assertThat(conf.get(BigQueryConfiguration.OUTPUT_TABLE_SCHEMA_KEY)).isNull();
+    assertThat(
+        BigQueryOutputConfiguration.getGcsOutputPath(conf).toString(), is(TEST_OUTPUT_PATH_STRING));
+  }
+
   /** Test an exception is thrown if a required parameter is missing for configure. */
   @Test
   public void testConfigureMissing() throws IOException {
@@ -134,9 +183,7 @@ public class BigQueryOutputConfigurationTest {
         () ->
             BigQueryOutputConfiguration.configure(
                 conf,
-                null,
-                TEST_DATASET_ID,
-                TEST_TABLE_ID,
+                QUALIFIED_TABLE_ID_WITHOUT_PROJECT,
                 TEST_TABLE_SCHEMA,
                 TEST_OUTPUT_PATH_STRING,
                 TEST_FILE_FORMAT,
@@ -148,9 +195,7 @@ public class BigQueryOutputConfigurationTest {
   public void testValidateConfiguration() throws IOException {
     BigQueryOutputConfiguration.configure(
         conf,
-        TEST_PROJECT_ID,
-        TEST_DATASET_ID,
-        TEST_TABLE_ID,
+        QUALIFIED_TABLE_ID,
         TEST_TABLE_SCHEMA,
         TEST_OUTPUT_PATH_STRING,
         TEST_FILE_FORMAT,
@@ -164,9 +209,7 @@ public class BigQueryOutputConfigurationTest {
   public void testValidateConfigurationMissingProjectId() throws IOException {
     BigQueryOutputConfiguration.configure(
         conf,
-        TEST_PROJECT_ID,
-        TEST_DATASET_ID,
-        TEST_TABLE_ID,
+        QUALIFIED_TABLE_ID,
         TEST_TABLE_SCHEMA,
         TEST_OUTPUT_PATH_STRING,
         TEST_FILE_FORMAT,
@@ -181,9 +224,7 @@ public class BigQueryOutputConfigurationTest {
   public void testValidateConfigurationBadSchema() throws IOException {
     BigQueryOutputConfiguration.configure(
         conf,
-        TEST_PROJECT_ID,
-        TEST_DATASET_ID,
-        TEST_TABLE_ID,
+        QUALIFIED_TABLE_ID,
         TEST_TABLE_SCHEMA,
         TEST_OUTPUT_PATH_STRING,
         TEST_FILE_FORMAT,
@@ -198,9 +239,7 @@ public class BigQueryOutputConfigurationTest {
   public void testValidateConfigurationMissingFileFormat() throws IOException {
     BigQueryOutputConfiguration.configure(
         conf,
-        TEST_PROJECT_ID,
-        TEST_DATASET_ID,
-        TEST_TABLE_ID,
+        QUALIFIED_TABLE_ID,
         TEST_TABLE_SCHEMA,
         TEST_OUTPUT_PATH_STRING,
         TEST_FILE_FORMAT,
@@ -215,9 +254,7 @@ public class BigQueryOutputConfigurationTest {
   public void testValidateConfigurationMissingOutputFormat() throws IOException {
     BigQueryOutputConfiguration.configure(
         conf,
-        TEST_PROJECT_ID,
-        TEST_DATASET_ID,
-        TEST_TABLE_ID,
+        QUALIFIED_TABLE_ID,
         TEST_TABLE_SCHEMA,
         TEST_OUTPUT_PATH_STRING,
         TEST_FILE_FORMAT,
@@ -290,9 +327,9 @@ public class BigQueryOutputConfigurationTest {
   public void testGetTableReferenceSchema() throws IOException {
     conf.set(BigQueryConfiguration.OUTPUT_TABLE_SCHEMA_KEY, TEST_TABLE_SCHEMA_STRING);
 
-    TableSchema result = BigQueryOutputConfiguration.getTableSchema(conf);
+    Optional<BigQueryTableSchema> result = BigQueryOutputConfiguration.getTableSchema(conf);
 
-    assertThat(result, is(TEST_TABLE_SCHEMA));
+    assertThat(result.get(), is(TEST_TABLE_SCHEMA));
   }
 
   /** Test the getTableSchema throws an exception when the schema is malformed. */

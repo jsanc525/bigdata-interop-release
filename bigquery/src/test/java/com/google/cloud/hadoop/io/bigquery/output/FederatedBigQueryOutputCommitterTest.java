@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright 2017 Google LLC
  *
  *  Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
@@ -62,6 +62,9 @@ public class FederatedBigQueryOutputCommitterTest {
   /** Sample tableId for output. */
   private static final String TEST_TABLE_ID = "table";
 
+  private static final String QUALIFIED_TEST_TABLE_ID =
+      String.format("%s:%s.%s", TEST_PROJECT_ID, TEST_DATASET_ID, TEST_TABLE_ID);
+
   /** Sample output file format for the committer. */
   private static final BigQueryFileFormat TEST_FILE_FORMAT =
       BigQueryFileFormat.NEWLINE_DELIMITED_JSON;
@@ -71,12 +74,13 @@ public class FederatedBigQueryOutputCommitterTest {
   private static final Class<? extends FileOutputFormat> TEST_OUTPUT_CLASS = TextOutputFormat.class;
 
   /** Sample table schema used for output. */
-  private static final TableSchema TEST_TABLE_SCHEMA =
-      new TableSchema()
-          .setFields(
-              ImmutableList.of(
-                  new TableFieldSchema().setName("Word").setType("STRING"),
-                  new TableFieldSchema().setName("Count").setType("INTEGER")));
+  private static final BigQueryTableSchema TEST_TABLE_SCHEMA =
+      BigQueryTableSchema.wrap(
+          new TableSchema()
+              .setFields(
+                  ImmutableList.of(
+                      new TableFieldSchema().setName("Word").setType("STRING"),
+                      new TableFieldSchema().setName("Count").setType("INTEGER"))));
 
   /** A sample task ID for the mock TaskAttemptContext. */
   private static final TaskAttemptID TEST_TASK_ATTEMPT_ID =
@@ -129,9 +133,7 @@ public class FederatedBigQueryOutputCommitterTest {
     CredentialConfigurationUtil.addTestConfigurationSettings(conf);
     BigQueryOutputConfiguration.configure(
         conf,
-        TEST_PROJECT_ID,
-        TEST_DATASET_ID,
-        TEST_TABLE_ID,
+        QUALIFIED_TEST_TABLE_ID,
         TEST_TABLE_SCHEMA,
         TEST_OUTPUT_PATH_STRING,
         TEST_FILE_FORMAT,
@@ -188,7 +190,7 @@ public class FederatedBigQueryOutputCommitterTest {
         .importFederatedFromGcs(
             eq(TEST_PROJECT_ID),
             eq(outputTableRef),
-            eq(TEST_TABLE_SCHEMA),
+            eq(TEST_TABLE_SCHEMA.get()),
             eq(TEST_FILE_FORMAT),
             gcsOutputFileCaptor.capture());
 

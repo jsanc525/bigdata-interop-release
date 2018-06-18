@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright 2017 Google LLC
  *
  *  Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
@@ -182,7 +182,7 @@ public class DynamicFileListRecordReaderTest {
       throws IOException {
     assertThat(recordReader.getCurrentKey()).isNull();
     assertThat(recordReader.getCurrentValue()).isNull();
-    assertThat(recordReader.getProgress()).isWithin(0.0f).of(0.0f);
+    assertThat(recordReader.getProgress()).isZero();
   }
 
   @Test
@@ -191,7 +191,7 @@ public class DynamicFileListRecordReaderTest {
     inputSplit = new ShardedInputSplit(shardPath, 0);
     recordReader = createReader();
     recordReader.initialize(inputSplit, mockTaskContext);
-    assertThat(recordReader.getProgress()).isWithin(0.0f).of(0.0f);
+    assertThat(recordReader.getProgress()).isZero();
   }
 
   @Test

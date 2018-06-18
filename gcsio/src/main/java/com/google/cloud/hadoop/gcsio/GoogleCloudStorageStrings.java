@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright 2013 Google Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -53,9 +53,10 @@ public class GoogleCloudStorageStrings {
       // The underlying GCS API does return objectName when it equals the prefix, but our
       // GoogleCloudStorage wrapper filters this case if the objectName also ends with the
       // delimiter.
-      if (!objectName.startsWith(objectNamePrefix) ||
-          (objectName.equals(objectNamePrefix) &&
-              ((delimiter == null) || objectName.endsWith(delimiter)))) {
+      if (!objectName.startsWith(objectNamePrefix)
+          || (objectName.equals(objectNamePrefix)
+              && delimiter != null
+              && objectNamePrefix.endsWith(delimiter))) {
         return null;
       } else {
         suffixIndex = objectNamePrefix.length();

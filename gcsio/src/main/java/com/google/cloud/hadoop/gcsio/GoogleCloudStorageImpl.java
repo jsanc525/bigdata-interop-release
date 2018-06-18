@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright 2013 Google Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -16,7 +16,9 @@
 
 package com.google.cloud.hadoop.gcsio;
 
+import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
+import static com.google.common.collect.Sets.newConcurrentHashSet;
 
 import com.google.api.client.auth.oauth2.Credential;
 import com.google.api.client.googleapis.batch.json.JsonBatchCallback;
@@ -68,12 +70,12 @@ import java.nio.channels.SeekableByteChannel;
 import java.nio.channels.WritableByteChannel;
 import java.nio.file.FileAlreadyExistsException;
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentHashMap.KeySetView;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -127,7 +129,7 @@ public class GoogleCloudStorageImpl
             return BaseEncoding.base64().encode(bytes);
           }
         }
-  };
+      };
 
   private static final Function<String, byte[]> DECODE_METADATA_VALUES =
       new Function<String, byte[]>() {
@@ -140,7 +142,7 @@ public class GoogleCloudStorageImpl
             return null;
           }
         }
-  };
+      };
 
   /**
    * A factory for producing BackOff objects.
@@ -234,7 +236,13 @@ public class GoogleCloudStorageImpl
 
     Preconditions.checkNotNull(credential, "credential must not be null");
 
-    this.httpRequestInitializer = new RetryHttpInitializer(credential, options.getAppName());
+    this.httpRequestInitializer =
+        new RetryHttpInitializer(
+            credential,
+            options.getAppName(),
+            options.getMaxHttpRequestRetries(),
+            options.getHttpRequestConnectTimeout(),
+            options.getHttpRequestReadTimeout());
 
     HttpTransport httpTransport = HttpTransportFactory.createHttpTransport(
         options.getTransportType(), options.getProxyAddress());
@@ -543,8 +551,7 @@ public class GoogleCloudStorageImpl
     }
 
     // Gather exceptions to wrap in a composite exception at the end.
-    final Set<IOException> innerExceptions =
-        Collections.newSetFromMap(new ConcurrentHashMap<IOException, Boolean>());
+    final Set<IOException> innerExceptions = newConcurrentHashSet();
     final CountDownLatch latch = new CountDownLatch(resourceIds.size());
     for (final StorageResourceId resourceId : resourceIds) {
       final Storage.Objects.Insert insertObject = prepareEmptyInsert(resourceId, options);
@@ -726,12 +733,12 @@ public class GoogleCloudStorageImpl
     }
 
     // Gather exceptions to wrap in a composite exception at the end.
-    final List<IOException> innerExceptions = new ArrayList<>();
+    final KeySetView<IOException, Boolean> innerExceptions = ConcurrentHashMap.newKeySet();
     BatchHelper batchHelper =
         batchFactory.newBatchHelper(
             httpRequestInitializer, gcs, storageOptions.getMaxRequestsPerBatch());
 
-    for (final StorageResourceId fullObjectName : fullObjectNames) {
+    for (StorageResourceId fullObjectName : fullObjectNames) {
       queueSingleObjectDelete(fullObjectName, innerExceptions, batchHelper, 1);
     }
 
@@ -742,12 +749,10 @@ public class GoogleCloudStorageImpl
     }
   }
 
-  /**
-   * Helper to create a callback for a particular deletion request.
-   */
+  /** Helper to create a callback for a particular deletion request. */
   private JsonBatchCallback<Void> getDeletionCallback(
       final StorageResourceId fullObjectName,
-      final List<IOException> innerExceptions,
+      final KeySetView<IOException, Boolean> innerExceptions,
       final BatchHelper batchHelper,
       final int attempt,
       final long generation) {
@@ -772,17 +777,13 @@ public class GoogleCloudStorageImpl
             && attempt <= MAXIMUM_PRECONDITION_FAILURES_IN_DELETE) {
           LOG.info(
               "Precondition not met while deleting {} at generation {}. Attempt {}. Retrying.",
-              fullObjectName.toString(),
-              generation,
-              attempt);
+              fullObjectName, generation, attempt);
           queueSingleObjectDelete(fullObjectName, innerExceptions, batchHelper, attempt + 1);
         } else {
           innerExceptions.add(
               wrapException(
                   new IOException(e.toString()),
-                  String.format("Error deleting, stage 2 with generation %s", generation),
-                  bucketName,
-                  objectName));
+                  "Error deleting, stage 2 with generation " + generation, bucketName, objectName));
         }
       }
     };
@@ -790,7 +791,7 @@ public class GoogleCloudStorageImpl
 
   private void queueSingleObjectDelete(
       final StorageResourceId fullObjectName,
-      final List<IOException> innerExceptions,
+      final KeySetView<IOException, Boolean> innerExceptions,
       final BatchHelper batchHelper,
       final int attempt) throws IOException {
 
@@ -799,14 +800,13 @@ public class GoogleCloudStorageImpl
 
     if (fullObjectName.hasGenerationId()) {
       // We can go direct to the deletion request instead of first fetching generation id.
+      long generationId = fullObjectName.getGenerationId();
       Storage.Objects.Delete deleteObject =
-          configureRequest(
-              gcs.objects()
-                  .delete(bucketName, objectName)
-                  .setIfGenerationMatch(fullObjectName.getGenerationId()),
-              bucketName);
-      batchHelper.queue(deleteObject, getDeletionCallback(
-          fullObjectName, innerExceptions, batchHelper, attempt, fullObjectName.getGenerationId()));
+          configureRequest(gcs.objects().delete(bucketName, objectName), bucketName)
+              .setIfGenerationMatch(generationId);
+      batchHelper.queue(
+          deleteObject,
+          getDeletionCallback(fullObjectName, innerExceptions, batchHelper, attempt, generationId));
     } else {
       // We first need to get the current object version to issue a safe delete for only the
       // latest version of the object.
@@ -820,9 +820,8 @@ public class GoogleCloudStorageImpl
                 throws IOException {
               final Long generation = storageObject.getGeneration();
               Storage.Objects.Delete deleteObject =
-                  configureRequest(
-                      gcs.objects().delete(bucketName, objectName).setIfGenerationMatch(generation),
-                      bucketName);
+                  configureRequest(gcs.objects().delete(bucketName, objectName), bucketName)
+                      .setIfGenerationMatch(generation);
 
               batchHelper.queue(
                   deleteObject,
@@ -831,19 +830,15 @@ public class GoogleCloudStorageImpl
             }
 
             @Override
-            public void onFailure(GoogleJsonError googleJsonError, HttpHeaders httpHeaders)
-                throws IOException {
+            public void onFailure(GoogleJsonError googleJsonError, HttpHeaders httpHeaders) {
               if (errorExtractor.itemNotFound(googleJsonError)) {
                 // If the item isn't found, treat it the same as if it's not found in the delete
                 // case: assume the user wanted the object gone and now it is.
                 LOG.debug("deleteObjects({}) : get not found", fullObjectName);
               } else {
+                IOException ioException = new IOException(googleJsonError.toString());
                 innerExceptions.add(
-                    wrapException(
-                        new IOException(googleJsonError.toString()),
-                        "Error deleting, stage 1",
-                        bucketName,
-                        objectName));
+                    wrapException(ioException, "Error deleting, stage 1", bucketName, objectName));
               }
             }
           });
@@ -929,7 +924,7 @@ public class GoogleCloudStorageImpl
 
     // Gather FileNotFoundExceptions for individual objects,
     // but only throw a single combined exception at the end.
-    List<IOException> innerExceptions = new ArrayList<>();
+    KeySetView<IOException, Boolean> innerExceptions = ConcurrentHashMap.newKeySet();
 
     // Perform the copy operations.
     BatchHelper batchHelper =
@@ -969,7 +964,7 @@ public class GoogleCloudStorageImpl
    */
   private void rewriteInternal(
       final BatchHelper batchHelper,
-      final List<IOException> innerExceptions,
+      final KeySetView<IOException, Boolean> innerExceptions,
       final String srcBucketName, final String srcObjectName,
       final String dstBucketName, final String dstObjectName)
       throws IOException {
@@ -978,6 +973,7 @@ public class GoogleCloudStorageImpl
             gcs.objects().rewrite(srcBucketName, srcObjectName, dstBucketName, dstObjectName, null),
             srcBucketName);
 
+    // TODO(b/79750454) do not batch rewrite requests because they time out in batches.
     batchHelper.queue(
         rewriteObject,
         new JsonBatchCallback<RewriteResponse>() {
@@ -1021,7 +1017,7 @@ public class GoogleCloudStorageImpl
    */
   private void copyInternal(
       BatchHelper batchHelper,
-      final List<IOException> innerExceptions,
+      final KeySetView<IOException, Boolean> innerExceptions,
       final String srcBucketName, final String srcObjectName,
       final String dstBucketName, final String dstObjectName)
       throws IOException {
@@ -1049,7 +1045,7 @@ public class GoogleCloudStorageImpl
 
   /** Processes failed copy requests */
   private void onCopyFailure(
-      List<IOException> innerExceptions,
+      KeySetView<IOException, Boolean> innerExceptions,
       GoogleJsonError e,
       String srcBucketName, String srcObjectName) {
     if (errorExtractor.itemNotFound(e)) {
@@ -1166,45 +1162,51 @@ public class GoogleCloudStorageImpl
   }
 
   /**
-   * Helper for both listObjectNames and listObjectInfo that executes the actual API calls to
-   * get paginated lists, accumulating the StorageObjects and String prefixes into the params
-   * {@code listedObjects} and {@code listedPrefixes}.
+   * Helper for both listObjectNames and listObjectInfo that executes the actual API calls to get
+   * paginated lists, accumulating the StorageObjects and String prefixes into the params {@code
+   * listedObjects} and {@code listedPrefixes}.
    *
    * @param bucketName bucket name
    * @param objectNamePrefix object name prefix or null if all objects in the bucket are desired
    * @param delimiter delimiter to use (typically "/"), otherwise null
-   * @param maxResults maximum number of results to return (total of both
-   *        listedObject and listedPrefixes), unlimited if negative or zero
+   * @param includeTrailingDelimiter whether to include prefix objects into the {@code
+   *     listedObjects}
+   * @param maxResults maximum number of results to return (total of both {@code listedObjects} and
+   *     {@code listedPrefixes}), unlimited if negative or zero
    * @param listedObjects output parameter into which retrieved StorageObjects will be added
    * @param listedPrefixes output parameter into which retrieved prefixes will be added
    */
   private void listStorageObjectsAndPrefixes(
-      String bucketName, String objectNamePrefix, String delimiter,
+      String bucketName,
+      String objectNamePrefix,
+      String delimiter,
+      boolean includeTrailingDelimiter,
       long maxResults,
-      List<StorageObject> listedObjects, List<String> listedPrefixes)
+      List<StorageObject> listedObjects,
+      List<String> listedPrefixes)
       throws IOException {
-    LOG.debug("listStorageObjectsAndPrefixes({}, {}, {}, {})",
+    LOG.debug(
+        "listStorageObjectsAndPrefixes({}, {}, {}, {})",
         bucketName, objectNamePrefix, delimiter, maxResults);
-    Preconditions.checkArgument(!Strings.isNullOrEmpty(bucketName),
-        "bucketName must not be null or empty");
-    Preconditions.checkArgument(listedObjects != null,
-        "Must provide a non-null container for listedObjects.");
-    Preconditions.checkArgument(listedPrefixes != null,
-        "Must provide a non-null container for listedPrefixes.");
-    Preconditions.checkArgument(listedObjects.size() == 0,
-        "Must provide an empty container for listedObjects.");
-    Preconditions.checkArgument(listedPrefixes.size() == 0,
-        "Must provide an empty container for listedPrefixes.");
+
+    checkArgument(!Strings.isNullOrEmpty(bucketName), "bucketName must not be null or empty");
+    checkArgument(
+        listedObjects != null && listedObjects.isEmpty(),
+        "Must provide a non-null empty container for listedObjects.");
+    checkArgument(
+        listedPrefixes != null && listedPrefixes.isEmpty(),
+        "Must provide a non-null empty container for listedPrefixes.");
+
     Storage.Objects.List listObject = configureRequest(gcs.objects().list(bucketName), bucketName);
 
     // Set delimiter if supplied.
     if (delimiter != null) {
       listObject.setDelimiter(delimiter);
+      listObject.setIncludeTrailingDelimiter(includeTrailingDelimiter);
     }
 
     // Set number of items to retrieve per call.
-    if (maxResults <= 0
-        || maxResults + 1 >= storageOptions.getMaxListItemsPerCall()) {
+    if (maxResults <= 0 || maxResults + 1 >= storageOptions.getMaxListItemsPerCall()) {
       listObject.setMaxResults(storageOptions.getMaxListItemsPerCall());
     } else {
       // We add one in case we filter out objectNamePrefix.
@@ -1218,17 +1220,17 @@ public class GoogleCloudStorageImpl
 
     // Loop till we fetch all items.
     String pageToken = null;
-    Objects items;
 
-    long numResults = (long) listedObjects.size() + listedPrefixes.size();
-    long maxRemainingResults = maxResults - numResults;
-
+    // Deduplicate prefixes and items, because if 'includeTrailingDelimiter' set to true
+    // then returned items will contain "prefix objects" too.
+    Set<String> prefixes = new LinkedHashSet<>();
     do {
       if (pageToken != null) {
         LOG.debug("listStorageObjectsAndPrefixes: next page {}", pageToken);
         listObject.setPageToken(pageToken);
       }
 
+      Objects items;
       try {
         items = listObject.execute();
       } catch (IOException e) {
@@ -1243,24 +1245,13 @@ public class GoogleCloudStorageImpl
       }
 
       // Add prefixes (if any).
-      List<String> prefixes = items.getPrefixes();
-      if (prefixes != null) {
-        LOG.debug("listed {} prefixes", prefixes.size());
-        numResults = (long) listedObjects.size() + listedPrefixes.size();
-        maxRemainingResults = maxResults - numResults;
-        if (maxResults <= 0 || maxRemainingResults >= prefixes.size()) {
-          listedPrefixes.addAll(prefixes);
-        } else {
-          for (int ii = 0; ii < maxRemainingResults; ii++) {
-            listedPrefixes.add(prefixes.get(ii));
-          }
-        }
-      }
-
-      numResults = (long) listedObjects.size() + listedPrefixes.size();
-      maxRemainingResults = maxResults - numResults;
-      if (maxResults > 0 && maxRemainingResults <= 0) {
-        break;
+      List<String> pagePrefixes = items.getPrefixes();
+      if (pagePrefixes != null) {
+        LOG.debug("listed {} prefixes", pagePrefixes.size());
+        long maxRemainingResults = getMaxRemainingResults(maxResults, prefixes, listedObjects);
+        // Do not cast 'maxRemainingResults' to int here, it could overflow
+        long maxPrefixes = Math.min(maxRemainingResults, (long) pagePrefixes.size());
+        prefixes.addAll(pagePrefixes.subList(0, (int) maxPrefixes));
       }
 
       // Add object names (if any).
@@ -1283,28 +1274,35 @@ public class GoogleCloudStorageImpl
         boolean objectPrefixEndsWithDelimiter =
             !Strings.isNullOrEmpty(objectNamePrefix) && objectNamePrefix.endsWith(PATH_DELIMITER);
 
+        long maxRemainingResults = getMaxRemainingResults(maxResults, prefixes, listedObjects);
         for (StorageObject object : objects) {
           String objectName = object.getName();
-          if (!objectPrefixEndsWithDelimiter
-              || (objectPrefixEndsWithDelimiter && !objectName.equals(objectNamePrefix))) {
-            if (maxResults <= 0 || maxRemainingResults > 0) {
+          if (!objectPrefixEndsWithDelimiter || !objectName.equals(objectNamePrefix)) {
+            if (prefixes.remove(objectName)) {
+              listedObjects.add(object);
+            } else if (maxRemainingResults > 0) {
               listedObjects.add(object);
               maxRemainingResults--;
-            } else {
-              break;
             }
+            // Do not break here, because we want to be sure
+            // that we replaced all prefixes with prefix objects
           }
         }
       }
 
-      numResults = (long) listedObjects.size() + listedPrefixes.size();
-      maxRemainingResults = maxResults - numResults;
-      if (maxResults > 0 && maxRemainingResults <= 0) {
-        break;
-      }
-
       pageToken = items.getNextPageToken();
-    } while (pageToken != null);
+    } while (pageToken != null && getMaxRemainingResults(maxResults, prefixes, listedObjects) > 0);
+
+    listedPrefixes.addAll(prefixes);
+  }
+
+  private static long getMaxRemainingResults(
+      long maxResults, Set<String> prefixes, List<StorageObject> objects) {
+    if (maxResults <= 0) {
+      return Long.MAX_VALUE;
+    }
+    long numResults = (long) prefixes.size() + objects.size();
+    return maxResults - numResults;
   }
 
   /**
@@ -1315,28 +1313,32 @@ public class GoogleCloudStorageImpl
   public List<String> listObjectNames(
       String bucketName, String objectNamePrefix, String delimiter)
       throws IOException {
-    return listObjectNames(bucketName, objectNamePrefix, delimiter,
-        GoogleCloudStorage.MAX_RESULTS_UNLIMITED);
+    return listObjectNames(
+        bucketName, objectNamePrefix, delimiter, GoogleCloudStorage.MAX_RESULTS_UNLIMITED);
   }
 
   /**
-   * See {@link GoogleCloudStorage#listObjectNames(String, String, String, long)}
-   * for details about expected behavior.
+   * See {@link GoogleCloudStorage#listObjectNames(String, String, String, long)} for details about
+   * expected behavior.
    */
   @Override
   public List<String> listObjectNames(
-      String bucketName, String objectNamePrefix, String delimiter,
-      long maxResults)
+      String bucketName, String objectNamePrefix, String delimiter, long maxResults)
       throws IOException {
-    LOG.debug("listObjectNames({}, {}, {}, {})",
-        bucketName, objectNamePrefix, delimiter, maxResults);
+    LOG.debug(
+        "listObjectNames({}, {}, {}, {})", bucketName, objectNamePrefix, delimiter, maxResults);
 
     // Helper will handle going through pages of list results and accumulating them.
     List<StorageObject> listedObjects = new ArrayList<>();
     List<String> listedPrefixes = new ArrayList<>();
     listStorageObjectsAndPrefixes(
-        bucketName, objectNamePrefix, delimiter, maxResults,
-        listedObjects, listedPrefixes);
+        bucketName,
+        objectNamePrefix,
+        delimiter,
+        /* includeTrailingDelimiter= */ false,
+        maxResults,
+        listedObjects,
+        listedPrefixes);
 
     // Just use the prefix list as a starting point, and extract all the names from the
     // StorageObjects, adding them to the list.
@@ -1361,119 +1363,112 @@ public class GoogleCloudStorageImpl
   }
 
   /**
-   * See {@link GoogleCloudStorage#listObjectInfo(String, String, String, long)}
-   * for details about expected behavior.
+   * See {@link GoogleCloudStorage#listObjectInfo(String, String, String, long)} for details about
+   * expected behavior.
    */
   @Override
   public List<GoogleCloudStorageItemInfo> listObjectInfo(
-      final String bucketName, String objectNamePrefix, String delimiter,
-      long maxResults)
+      final String bucketName, String objectNamePrefix, String delimiter, long maxResults)
       throws IOException {
-    LOG.debug("listObjectInfo({}, {}, {}, {})",
-        bucketName, objectNamePrefix, delimiter, maxResults);
+    LOG.debug(
+        "listObjectInfo({}, {}, {}, {})", bucketName, objectNamePrefix, delimiter, maxResults);
 
     // Helper will handle going through pages of list results and accumulating them.
     List<StorageObject> listedObjects = new ArrayList<>();
     List<String> listedPrefixes = new ArrayList<>();
     listStorageObjectsAndPrefixes(
-        bucketName, objectNamePrefix, delimiter, maxResults,
-        listedObjects, listedPrefixes);
+        bucketName,
+        objectNamePrefix,
+        delimiter,
+        /* includeTrailingDelimiter= */ storageOptions.isListDirectoryObjects(),
+        maxResults,
+        listedObjects,
+        listedPrefixes);
 
     // For the listedObjects, we simply parse each item into a GoogleCloudStorageItemInfo without
     // further work.
-    List<GoogleCloudStorageItemInfo> objectInfos = new ArrayList<>();
+    List<GoogleCloudStorageItemInfo> objectInfos = new ArrayList<>(listedObjects.size());
     for (StorageObject obj : listedObjects) {
-      objectInfos.add(createItemInfoForStorageObject(
-          new StorageResourceId(bucketName, obj.getName()), obj));
+      objectInfos.add(
+          createItemInfoForStorageObject(new StorageResourceId(bucketName, obj.getName()), obj));
     }
 
-    if (listedPrefixes.size() > 0) {
-      // Send requests to fetch info about the directories associated with each prefix in batch
-      // requests, maxRequestsPerBatch at a time.
-      List<StorageResourceId> resourceIdsForPrefixes = new ArrayList<>();
+    if (!listedPrefixes.isEmpty()) {
+      Set<StorageResourceId> prefixIds = new LinkedHashSet<>(listedPrefixes.size());
       for (String prefix : listedPrefixes) {
-        resourceIdsForPrefixes.add(new StorageResourceId(bucketName, prefix));
+        prefixIds.add(new StorageResourceId(bucketName, prefix));
       }
-      List<GoogleCloudStorageItemInfo> prefixInfos = getItemInfos(resourceIdsForPrefixes);
-      List<StorageResourceId> repairList = new ArrayList<>();
-      for (GoogleCloudStorageItemInfo prefixInfo : prefixInfos) {
-        if (prefixInfo.exists()) {
-          objectInfos.add(prefixInfo);
-        } else {
-          // This indicates a likely "implicit directory" due to a StorageObject lacking a GHFS-
-          // created parent directory.
-          String errorBase = String.format(
-              "Error retrieving object for a retrieved prefix with resourceId '%s'. ",
-              prefixInfo.getResourceId());
-          if (storageOptions.isAutoRepairImplicitDirectoriesEnabled()) {
-            LOG.debug(errorBase + "Attempting to repair missing directory.");
-            repairList.add(prefixInfo.getResourceId());
-          } else if (storageOptions.isInferImplicitDirectoriesEnabled()) {
-            objectInfos.add(
-                GoogleCloudStorageItemInfo.createInferredDirectory(prefixInfo.getResourceId()));
-          } else {
-            LOG.error(errorBase + "Giving up on retrieving missing directory.");
+
+      if (!storageOptions.isListDirectoryObjects()) {
+        // Send requests to fetch info about the directories associated with each prefix in batch
+        // requests, maxRequestsPerBatch at a time.
+        for (GoogleCloudStorageItemInfo prefixInfo : getItemInfos(new ArrayList<>(prefixIds))) {
+          if (prefixInfo.exists()) {
+            prefixIds.remove(prefixInfo.getResourceId());
+            objectInfos.add(prefixInfo);
           }
+        }
+
+        if (prefixIds.isEmpty()) {
+          return objectInfos;
         }
       }
 
       // Handle repairs.
-      if (storageOptions.isAutoRepairImplicitDirectoriesEnabled() && !repairList.isEmpty()) {
+      if (storageOptions.isAutoRepairImplicitDirectoriesEnabled()) {
+        LOG.info("Repairing batch of {} missing directories.", prefixIds.size());
+        LOG.debug("Directories to repair: {}", prefixIds);
+        List<StorageResourceId> prefixIdsList = new ArrayList<>(prefixIds);
         try {
-          LOG.warn("Repairing batch of {} missing directories.", repairList.size());
-          if (repairList.size() == 1) {
-            createEmptyObject(repairList.get(0));
+          if (prefixIds.size() == 1) {
+            createEmptyObject(prefixIdsList.get(0));
           } else {
-            createEmptyObjects(repairList);
+            createEmptyObjects(prefixIdsList);
           }
-
-          // Fetch and append all the repaired metadatas.
-          List<GoogleCloudStorageItemInfo> repairedInfos = getItemInfos(repairList);
-          int numRepaired = 0;
-          for (GoogleCloudStorageItemInfo repairedInfo : repairedInfos) {
-            if (repairedInfo.exists()) {
-              objectInfos.add(repairedInfo);
-              ++numRepaired;
-            } else {
-              LOG.warn("Somehow the repair for '{}' failed quietly", repairedInfo.getResourceId());
-              if (storageOptions.isInferImplicitDirectoriesEnabled()) {
-                objectInfos.add(
-                    GoogleCloudStorageItemInfo.createInferredDirectory(
-                        repairedInfo.getResourceId()));
-              }
-            }
-          }
-          LOG.warn("Successfully repaired {}/{} implicit directories.",
-              numRepaired, repairList.size());
         } catch (IOException ioe) {
-          // Don't totally fail the listObjectInfo call, since auto-repair is best-effort
-          // anyways.
+          // Don't totally fail the listObjectInfo call, since auto-repair is best-effort anyways.
           LOG.error("Failed to repair some missing directories.", ioe);
-          if (storageOptions.isInferImplicitDirectoriesEnabled()) {
-            // If we have both auto-repair and auto-infer set, and we fail
-            // to repair everything, then infer what was not repaired.
-            List<GoogleCloudStorageItemInfo> repairedInfos = getItemInfos(repairList);
-            int numRepaired = 0;
-            for (GoogleCloudStorageItemInfo repairedInfo : repairedInfos) {
-              if (repairedInfo.exists()) {
-                objectInfos.add(repairedInfo);
-                ++numRepaired;
-              } else {
-                LOG.info("Repair for '{}' failed, using inferred directory",
-                    repairedInfo.getResourceId());
-                objectInfos.add(
-                    GoogleCloudStorageItemInfo.createInferredDirectory(
-                        repairedInfo.getResourceId()));
-              }
-            }
-            if (numRepaired > 0) {
-              LOG.info("Successfully repaired {}/{} implicit directories.",
-                  numRepaired, repairList.size());
-            }
-          }
+        }
+
+        List<GoogleCloudStorageItemInfo> repairedInfos = getItemInfos(prefixIdsList);
+        objectInfos.addAll(
+            inferOrFilterNotRepairedInfos(
+                repairedInfos, storageOptions.isInferImplicitDirectoriesEnabled()));
+      } else if (storageOptions.isInferImplicitDirectoriesEnabled()) {
+        for (StorageResourceId prefixId : prefixIds) {
+          objectInfos.add(GoogleCloudStorageItemInfo.createInferredDirectory(prefixId));
+        }
+      } else {
+        LOG.info(
+            "Directory repair and inferred directories are disabled, "
+                + "giving up on retrieving missing directories: {}",
+            prefixIds);
+      }
+    }
+
+    return objectInfos;
+  }
+
+  static List<GoogleCloudStorageItemInfo> inferOrFilterNotRepairedInfos(
+      List<GoogleCloudStorageItemInfo> repairInfos, boolean inferImplicitDirectories) {
+    // Fetch and append all the repaired items metadata.
+    List<GoogleCloudStorageItemInfo> objectInfos = new ArrayList<>(repairInfos.size());
+    int numRepaired = 0;
+    for (GoogleCloudStorageItemInfo repairedInfo : repairInfos) {
+      if (repairedInfo.exists()) {
+        objectInfos.add(repairedInfo);
+        ++numRepaired;
+      } else {
+        StorageResourceId resourceId = repairedInfo.getResourceId();
+        if (inferImplicitDirectories) {
+          LOG.info("Repair for '{}' failed, using inferred directory", resourceId);
+          objectInfos.add(GoogleCloudStorageItemInfo.createInferredDirectory(resourceId));
+        } else {
+          LOG.info("Repair for '{}' failed, skipping", resourceId);
         }
       }
     }
+    LOG.info("Successfully repaired {}/{} implicit directories.", numRepaired, repairInfos.size());
     return objectInfos;
   }
 
@@ -1570,8 +1565,8 @@ public class GoogleCloudStorageImpl
       throws IOException {
     LOG.debug("getItemInfos({})", resourceIds);
 
-    final Map<StorageResourceId, GoogleCloudStorageItemInfo> itemInfos = new HashMap<>();
-    final List<IOException> innerExceptions = new ArrayList<>();
+    final Map<StorageResourceId, GoogleCloudStorageItemInfo> itemInfos = new ConcurrentHashMap<>();
+    final Set<IOException> innerExceptions = newConcurrentHashSet();
     BatchHelper batchHelper = batchFactory.newBatchHelper(
         httpRequestInitializer,
         gcs,
@@ -1591,8 +1586,7 @@ public class GoogleCloudStorageImpl
               public void onSuccess(Bucket bucket, HttpHeaders responseHeaders) {
                 LOG.debug(
                     "getItemInfos: Successfully fetched bucket: {} for resourceId: {}",
-                    bucket,
-                    resourceId);
+                    bucket, resourceId);
                 itemInfos.put(resourceId, createItemInfoForBucket(resourceId, bucket));
               }
 
@@ -1602,12 +1596,10 @@ public class GoogleCloudStorageImpl
                   LOG.debug("getItemInfos: bucket not found: {}", resourceId.getBucketName());
                   itemInfos.put(resourceId, GoogleCloudStorageItemInfo.createNotFound(resourceId));
                 } else {
+                  IOException ioException = new IOException(e.toString());
                   innerExceptions.add(
                       wrapException(
-                          new IOException(e.toString()),
-                          "Error getting Bucket: ",
-                          resourceId.getBucketName(),
-                          null));
+                          ioException, "Error getting Bucket: ", resourceId.getBucketName(), null));
                 }
               }
             });
@@ -1621,8 +1613,7 @@ public class GoogleCloudStorageImpl
               public void onSuccess(StorageObject obj, HttpHeaders responseHeaders) {
                 LOG.debug(
                     "getItemInfos: Successfully fetched object '{}' for resourceId '{}'",
-                    obj,
-                    resourceId);
+                    obj, resourceId);
                 itemInfos.put(resourceId, createItemInfoForStorageObject(resourceId, obj));
               }
 
@@ -1632,12 +1623,10 @@ public class GoogleCloudStorageImpl
                   LOG.debug("getItemInfos: object not found: {}", resourceId);
                   itemInfos.put(resourceId, GoogleCloudStorageItemInfo.createNotFound(resourceId));
                 } else {
+                  IOException ioException = new IOException(e.toString());
                   innerExceptions.add(
                       wrapException(
-                          new IOException(e.toString()),
-                          "Error getting StorageObject: ",
-                          bucketName,
-                          objectName));
+                          ioException, "Error getting StorageObject: ", bucketName, objectName));
                 }
               }
             });
@@ -1672,8 +1661,9 @@ public class GoogleCloudStorageImpl
       throws IOException {
     LOG.debug("updateItems({})", itemInfoList);
 
-    final Map<StorageResourceId, GoogleCloudStorageItemInfo> resultItemInfos = new HashMap<>();
-    final List<IOException> innerExceptions = new ArrayList<>();
+    final Map<StorageResourceId, GoogleCloudStorageItemInfo> resultItemInfos =
+        new ConcurrentHashMap<>();
+    final Set<IOException> innerExceptions = newConcurrentHashSet();
     BatchHelper batchHelper = batchFactory.newBatchHelper(
         httpRequestInitializer,
         gcs,
@@ -1718,10 +1708,10 @@ public class GoogleCloudStorageImpl
                 resultItemInfos.put(
                     resourceId, GoogleCloudStorageItemInfo.createNotFound(resourceId));
               } else {
+                IOException ioException = new IOException(e.toString());
                 innerExceptions.add(
                     wrapException(
-                        new IOException(e.toString()),
-                        "Error getting StorageObject: ", bucketName, objectName));
+                        ioException, "Error getting StorageObject: ", bucketName, objectName));
               }
             }
           });
@@ -1859,8 +1849,7 @@ public class GoogleCloudStorageImpl
    * were being accessed when the exception occurred for an operation.
    */
   @VisibleForTesting
-  IOException wrapException(IOException e, String message,
-      String bucketName, String objectName) {
+  IOException wrapException(IOException e, String message, String bucketName, String objectName) {
     String name = "bucket: " + bucketName;
     if (!Strings.isNullOrEmpty(objectName)) {
       name += ", object: " + objectName;
@@ -1969,17 +1958,14 @@ public class GoogleCloudStorageImpl
     Preconditions.checkArgument(!Strings.isNullOrEmpty(bucketName),
         "bucketName must not be null or empty");
 
-    int maxRetries = BUCKET_EMPTY_MAX_RETRIES;
-    int waitTime = BUCKET_EMPTY_WAIT_TIME_MS;  // milliseconds
-    for (int i = 0; i < maxRetries; i++) {
+    for (int i = 0; i < BUCKET_EMPTY_MAX_RETRIES; i++) {
       // We only need one item to see the bucket is not yet empty.
-      List<String> objectNames = listObjectNames(bucketName, null,
-          PATH_DELIMITER, 1);
-      if (objectNames.size() == 0) {
+      List<String> objectNames = listObjectNames(bucketName, null, PATH_DELIMITER, 1);
+      if (objectNames.isEmpty()) {
         return;
       }
       try {
-        sleeper.sleep(waitTime);
+        sleeper.sleep(BUCKET_EMPTY_WAIT_TIME_MS);
       } catch (InterruptedException ignored) {
         // Ignore the exception and loop.
       }

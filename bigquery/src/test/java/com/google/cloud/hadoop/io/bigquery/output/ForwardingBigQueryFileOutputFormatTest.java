@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright 2017 Google LLC
  *
  *  Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
@@ -57,6 +57,10 @@ public class ForwardingBigQueryFileOutputFormatTest {
   /** Sample tableId for output. */
   private static final String TEST_TABLE_ID = "table";
 
+  /** Sample qualified tableId for output. */
+  private static final String QUALIFIED_TEST_TABLE_ID =
+      String.format("%s:%s.%s", TEST_PROJECT_ID, TEST_DATASET_ID, TEST_TABLE_ID);
+
   /** Sample output file format for the committer. */
   private static final BigQueryFileFormat TEST_FILE_FORMAT =
       BigQueryFileFormat.NEWLINE_DELIMITED_JSON;
@@ -107,12 +111,9 @@ public class ForwardingBigQueryFileOutputFormatTest {
     job = Job.getInstance(InMemoryGoogleHadoopFileSystem.getSampleConfiguration());
     conf = job.getConfiguration();
     CredentialConfigurationUtil.addTestConfigurationSettings(conf);
-    BigQueryOutputConfiguration.configure(
+    BigQueryOutputConfiguration.configureWithAutoSchema(
         conf,
-        TEST_PROJECT_ID,
-        TEST_DATASET_ID,
-        TEST_TABLE_ID,
-        null,
+        QUALIFIED_TEST_TABLE_ID,
         TEST_OUTPUT_PATH_STRING,
         TEST_FILE_FORMAT,
         TEST_OUTPUT_CLASS);

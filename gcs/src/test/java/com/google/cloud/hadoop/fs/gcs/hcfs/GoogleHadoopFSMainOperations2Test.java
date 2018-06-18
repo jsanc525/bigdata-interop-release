@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright 2014 Google Inc. All Rights Reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
@@ -74,6 +74,10 @@ public class GoogleHadoopFSMainOperations2Test extends FSMainOperationsBaseTest 
   // Ignore: FS-level permissions are not supported in GCS
   @Override
   public void testListStatusThrowsExceptionForUnreadableDir() {}
+
+  // Ignore: FS-level permissions are not supported in GCS
+  @Test
+  public void testGlobStatusThrowsExceptionForUnreadableDir() {}
 
   // Ignore: unit tests can not access Local FS
   @Override

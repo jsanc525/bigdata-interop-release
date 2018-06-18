@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright 2013 Google Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -26,7 +26,10 @@ import com.google.cloud.hadoop.gcsio.GoogleCloudStorageFileSystemOptions;
 import com.google.cloud.hadoop.gcsio.GoogleCloudStorageItemInfo;
 import com.google.cloud.hadoop.gcsio.PathCodec;
 import com.google.cloud.hadoop.gcsio.StorageResourceId;
+import com.google.cloud.hadoop.util.AccessTokenProvider;
+import com.google.cloud.hadoop.util.AccessTokenProviderClassFromConfigFactory;
 import com.google.cloud.hadoop.util.CredentialFactory;
+import com.google.cloud.hadoop.util.CredentialFromAccessTokenProviderClassFactory;
 import com.google.cloud.hadoop.util.EntriesCredentialConfiguration;
 import com.google.cloud.hadoop.util.HadoopCredentialConfiguration;
 import com.google.cloud.hadoop.util.HadoopVersionInfo;
@@ -376,6 +379,13 @@ public abstract class GoogleHadoopFileSystemBase extends GoogleHadoopFileSystemB
    */
   private boolean enableInferImplicitDirectories = GCS_ENABLE_INFER_IMPLICIT_DIRECTORIES_DEFAULT;
 
+
+  @Deprecated private static final String GCS_ENABLE_LIST_DIRECTORY_OBJECTS_KEY =
+      "fs.gs.list.directory.objects.enable";
+  @Deprecated private static final boolean GCS_ENABLE_LIST_DIRECTORY_OBJECTS_KEY_DEFAULT = true;
+  @Deprecated
+  private boolean enableListDirectoryObjects = GCS_ENABLE_LIST_DIRECTORY_OBJECTS_KEY_DEFAULT;
+
   /**
    * Configuration key for enabling the use of a large flat listing to pre-populate possible glob
    * matches in a single API call before running the core globbing logic in-memory rather than
@@ -388,8 +398,8 @@ public abstract class GoogleHadoopFileSystemBase extends GoogleHadoopFileSystemB
 
   /**
    * Configuration key for enabling the use of marker files during file creation. When running
-   * non-MR applications that make use of the FileSystem, it is a idea to enable marker files to
-   * better mimic HDFS overwrite and locking behavior.
+   * non-MR applications that make use of the FileSystem, it is a good idea to enable marker files
+   * to better mimic HDFS overwrite and locking behavior.
    */
   public static final String GCS_ENABLE_MARKER_FILE_CREATION_KEY =
       "fs.gs.create.marker.files.enable";
@@ -420,6 +430,31 @@ public abstract class GoogleHadoopFileSystemBase extends GoogleHadoopFileSystemB
   public static final long GCS_MAX_REQUESTS_PER_BATCH_DEFAULT = 30;
 
   /**
+   * Configuration key for the max number of retries for failed HTTP request to GCS. Note that the
+   * connector will retry *up to* the number of times as specified, using a default
+   * ExponentialBackOff strategy.
+   *
+   * <p>Also, note that this number will only control the number of retries in the low level HTTP
+   * request implementation.
+   */
+  public static final String GCS_HTTP_MAX_RETRY_KEY = "fs.gs.http.max.retry";
+
+  /** Default value for {@link GoogleHadoopFileSystemBase#GCS_HTTP_MAX_RETRY_KEY}. */
+  public static final int GCS_HTTP_MAX_RETRY_DEFAULT = 10;
+
+  /** Configuration key for the connect timeout (in millisecond) for HTTP request to GCS. */
+  public static final String GCS_HTTP_CONNECT_TIMEOUT_KEY = "fs.gs.http.connect-timeout";
+
+  /** Default value for {@link GoogleHadoopFileSystemBase#GCS_HTTP_CONNECT_TIMEOUT_KEY}. */
+  public static final int GCS_HTTP_CONNECT_TIMEOUT_DEFAULT = 20 * 1000;
+
+  /** Configuration key for the connect timeout (in millisecond) for HTTP request to GCS. */
+  public static final String GCS_HTTP_READ_TIMEOUT_KEY = "fs.gs.http.read-timeout";
+
+  /** Default value for {@link GoogleHadoopFileSystemBase#GCS_HTTP_READ_TIMEOUT_KEY}. */
+  public static final int GCS_HTTP_READ_TIMEOUT_DEFAULT = 20 * 1000;
+
+  /**
    * Configuration key for setting a proxy for the connector to use to connect to GCS. The proxy
    * must be an HTTP proxy of the form "host:port".
    */
@@ -439,7 +474,7 @@ public abstract class GoogleHadoopFileSystemBase extends GoogleHadoopFileSystemB
 
   /** Default to the default specified in HttpTransportFactory. */
   public static final String GCS_HTTP_TRANSPORT_DEFAULT =
-      EntriesCredentialConfiguration.PROXY_ADDRESS_DEFAULT;
+      EntriesCredentialConfiguration.HTTP_TRANSPORT_DEFAULT;
 
   /** Configuration key for adding a suffix to the GHFS application name sent to GCS. */
   public static final String GCS_APPLICATION_NAME_SUFFIX_KEY = "fs.gs.application.name.suffix";
@@ -1662,7 +1697,9 @@ public abstract class GoogleHadoopFileSystemBase extends GoogleHadoopFileSystemB
             /* owner= */ USER_NAME,
             /* group= */ USER_NAME,
             getHadoopPath(fileInfo.getPath()));
-    LOG.debug("GHFS.getFileStatus: {} => {}", fileInfo.getPath(), fileStatusToString(status));
+    if (LOG.isDebugEnabled()) {
+      LOG.debug("GHFS.getFileStatus: {} => {}", fileInfo.getPath(), fileStatusToString(status));
+    }
     return status;
   }
 
@@ -1828,6 +1865,29 @@ public abstract class GoogleHadoopFileSystemBase extends GoogleHadoopFileSystemB
   }
 
   /**
+   * Retrieve user's Credential. If user implemented {@link AccessTokenProvider} and provided the
+   * class name (See {@link AccessTokenProviderClassFromConfigFactory} then build a credential with
+   * access token provided by this provider; Otherwise obtain credential through {@link
+   * HadoopCredentialConfiguration#getCredential(List)}.
+   */
+  private Credential getCredential(
+      AccessTokenProviderClassFromConfigFactory providerClassFactory, Configuration config)
+      throws IOException, GeneralSecurityException {
+    Credential credential =
+        CredentialFromAccessTokenProviderClassFactory.credential(
+            providerClassFactory, config, CredentialFactory.GCS_SCOPES);
+    if (credential != null) {
+      return credential;
+    }
+
+    return HadoopCredentialConfiguration.newBuilder()
+        .withConfiguration(config)
+        .withOverridePrefix(AUTHENTICATION_PREFIX)
+        .build()
+        .getCredential(CredentialFactory.GCS_SCOPES);
+  }
+
+  /**
    * Configures GHFS using the supplied configuration.
    *
    * @param config Hadoop configuration object.
@@ -1843,12 +1903,10 @@ public abstract class GoogleHadoopFileSystemBase extends GoogleHadoopFileSystemB
 
       Credential credential;
       try {
-        credential = HadoopCredentialConfiguration
-            .newBuilder()
-            .withConfiguration(config)
-            .withOverridePrefix(AUTHENTICATION_PREFIX)
-            .build()
-            .getCredential(CredentialFactory.GCS_SCOPES);
+        credential =
+            getCredential(
+                new AccessTokenProviderClassFromConfigFactory().withOverridePrefix("fs.gs"),
+                config);
       } catch (GeneralSecurityException gse) {
         throw new IOException(gse);
       }
@@ -2151,15 +2209,19 @@ public abstract class GoogleHadoopFileSystemBase extends GoogleHadoopFileSystemB
     LOG.debug("{} = {}", GCS_ENABLE_INFER_IMPLICIT_DIRECTORIES_KEY,
               enableInferImplicitDirectories);
 
-    enableFlatGlob = config.getBoolean(
-        GCS_ENABLE_FLAT_GLOB_KEY,
-        GCS_ENABLE_FLAT_GLOB_DEFAULT);
-    LOG.debug("{} = {}", GCS_ENABLE_FLAT_GLOB_KEY, enableFlatGlob);
+    enableListDirectoryObjects =
+        config.getBoolean(
+            GCS_ENABLE_LIST_DIRECTORY_OBJECTS_KEY, GCS_ENABLE_LIST_DIRECTORY_OBJECTS_KEY_DEFAULT);
+    LOG.debug("{} = {}", GCS_ENABLE_LIST_DIRECTORY_OBJECTS_KEY, enableListDirectoryObjects);
 
     optionsBuilder
         .getCloudStorageOptionsBuilder()
         .setAutoRepairImplicitDirectoriesEnabled(enableAutoRepairImplicitDirectories)
-        .setInferImplicitDirectoriesEnabled(enableInferImplicitDirectories);
+        .setInferImplicitDirectoriesEnabled(enableInferImplicitDirectories)
+        .setListDirectoryObjects(enableListDirectoryObjects);
+
+    enableFlatGlob = config.getBoolean(GCS_ENABLE_FLAT_GLOB_KEY, GCS_ENABLE_FLAT_GLOB_DEFAULT);
+    LOG.debug("{} = {}", GCS_ENABLE_FLAT_GLOB_KEY, enableFlatGlob);
 
     boolean enableMarkerFileCreation = config.getBoolean(
         GCS_ENABLE_MARKER_FILE_CREATION_KEY,
@@ -2203,6 +2265,27 @@ public abstract class GoogleHadoopFileSystemBase extends GoogleHadoopFileSystemB
     LOG.debug("{} = {}", GCS_MAX_REQUESTS_PER_BATCH, maxRequestsPerBatch);
 
     optionsBuilder.getCloudStorageOptionsBuilder().setMaxRequestsPerBatch(maxRequestsPerBatch);
+
+    int maxHttpRequestRetries = config.getInt(GCS_HTTP_MAX_RETRY_KEY, GCS_HTTP_MAX_RETRY_DEFAULT);
+    LOG.debug("{} = {}", GCS_HTTP_MAX_RETRY_KEY, maxHttpRequestRetries);
+
+    optionsBuilder.getCloudStorageOptionsBuilder().setMaxHttpRequestRetries(maxHttpRequestRetries);
+
+    int httpRequestConnectTimeout =
+        config.getInt(GCS_HTTP_CONNECT_TIMEOUT_KEY, GCS_HTTP_CONNECT_TIMEOUT_DEFAULT);
+    LOG.debug("{} = {}", GCS_HTTP_CONNECT_TIMEOUT_KEY, httpRequestConnectTimeout);
+
+    optionsBuilder
+        .getCloudStorageOptionsBuilder()
+        .setHttpRequestConnectTimeout(httpRequestConnectTimeout);
+
+    int httpRequestReadTimeout =
+        config.getInt(GCS_HTTP_READ_TIMEOUT_KEY, GCS_HTTP_READ_TIMEOUT_DEFAULT);
+    LOG.debug("{} = {}", GCS_HTTP_READ_TIMEOUT_KEY, httpRequestReadTimeout);
+
+    optionsBuilder
+        .getCloudStorageOptionsBuilder()
+        .setHttpRequestReadTimeout(httpRequestReadTimeout);
 
     // Configuration for setting 250GB upper limit on file size to gain higher write throughput.
     boolean limitFileSizeTo250Gb =

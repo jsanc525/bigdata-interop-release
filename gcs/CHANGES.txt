@@ -1,4 +1,4 @@
-1.9.0 - 2018-XX-XX
+1.9.0 - 2018-06-15
 
   1. Update all dependencies to latest versions.
 
@@ -25,6 +25,21 @@
 
   8. Fix thread leaks that were occurring when YARN log aggregation uploaded
      logs to GCS.
+
+  9. Add interface through which user can directly provide the access token.
+
+  10. Add more retries and error handling in GoogleCloudStorageReadChannel,
+      to make it more resilient to network errors; also add a property to allow users
+      to specify number of retries on low level GCS HTTP requests in case of server
+      errors and I/O errors.
+
+  11. Add properties to allow users to specify connect timeout and read timeout on
+      low level GCS HTTP requests.
+
+  12. Include prefix/directory objects metadata into `storage.objects.list`
+      requests response to improve performance (i.e. set
+      `includeTrailingDelimiter` parameter for `storage.objects.list` GCS
+      requests to `true`).
 
 
 1.8.1 - 2018-03-29

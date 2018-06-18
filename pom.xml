@@ -26,7 +26,7 @@
 
   <groupId>com.google.cloud.bigdataoss</groupId>
   <artifactId>bigdataoss-parent</artifactId>
-  <version>1.9.0-SNAPSHOT</version>
+  <version>1.9.0</version>
   <packaging>pom</packaging>
 
   <url>https://github.com/GoogleCloudPlatform/BigData-interop/</url>
@@ -92,7 +92,7 @@
 
     <gpg.skip>true</gpg.skip>
 
-    <bigdataoss.version>1.9.0-SNAPSHOT</bigdataoss.version>
+    <bigdataoss.version>1.9.0</bigdataoss.version>
 
     <!-- Keep in sync with Hadoop dependencies -->
     <apache.avro.version>1.7.7</apache.avro.version>
@@ -102,17 +102,17 @@
     <apache.httpcomponents.version>4.0.1</apache.httpcomponents.version>
 
     <google.api.version>1.23.0</google.api.version>
-    <google.api-bigquery.version>v2-rev387-${google.api.version}</google.api-bigquery.version>
-    <google.api-storage.version>v1-rev129-${google.api.version}</google.api-storage.version>
+    <google.api-bigquery.version>v2-rev391-${google.api.version}</google.api-bigquery.version>
+    <google.api-storage.version>v1-rev133-${google.api.version}</google.api-storage.version>
     <google.auto-value.version>1.6</google.auto-value.version>
     <google.findbugs.version>3.0.0</google.findbugs.version>
-    <google.guava.version>25.0-jre</google.guava.version>
+    <google.guava.version>25.1-jre</google.guava.version>
     <google.truth.version>0.40</google.truth.version>
     <hadoop.one.version>1.2.1</hadoop.one.version>
-    <hadoop.two.version>2.8.3</hadoop.two.version>
+    <hadoop.two.version>2.9.0</hadoop.two.version>
     <hadoop.three.version>3.1.0</hadoop.three.version>
     <hamcrest.version>1.3</hamcrest.version>
-    <joda-time.version>2.9.9</joda-time.version>
+    <joda-time.version>2.10</joda-time.version>
     <junit.version>4.13-SNAPSHOT</junit.version>
     <log4j.version>1.2.17</log4j.version>
     <mockito.version>1.10.19</mockito.version>
@@ -133,7 +133,24 @@
       <properties>
         <hadoop.identifier>hadoop1</hadoop.identifier>
       </properties>
+      <dependencyManagement>
+        <dependencies>
+          <dependency>
+            <groupId>org.apache.hadoop</groupId>
+            <artifactId>hadoop-core</artifactId>
+            <version>${hadoop.one.version}</version>
+            <scope>provided</scope>
+          </dependency>
+          <dependency>
+            <groupId>org.apache.hadoop</groupId>
+            <artifactId>hadoop-test</artifactId>
+            <version>${hadoop.one.version}</version>
+            <scope>test</scope>
+          </dependency>
+        </dependencies>
+      </dependencyManagement>
     </profile>
+
     <profile>
       <id>hadoop2</id>
       <properties>
@@ -142,13 +159,82 @@
       <activation>
         <activeByDefault>true</activeByDefault>
       </activation>
+      <dependencyManagement>
+        <dependencies>
+          <dependency>
+            <groupId>org.apache.hadoop</groupId>
+            <artifactId>hadoop-common</artifactId>
+            <version>${hadoop.two.version}</version>
+            <scope>provided</scope>
+          </dependency>
+          <dependency>
+            <groupId>org.apache.hadoop</groupId>
+            <artifactId>hadoop-common</artifactId>
+            <version>${hadoop.two.version}</version>
+            <classifier>tests</classifier>
+            <scope>test</scope>
+          </dependency>
+          <dependency>
+            <groupId>org.apache.hadoop</groupId>
+            <artifactId>hadoop-mapreduce-client-core</artifactId>
+            <version>${hadoop.two.version}</version>
+            <scope>provided</scope>
+          </dependency>
+        </dependencies>
+      </dependencyManagement>
     </profile>
+
     <profile>
       <id>hadoop3</id>
       <properties>
         <hadoop.identifier>hadoop3</hadoop.identifier>
       </properties>
+      <dependencyManagement>
+        <dependencies>
+          <dependency>
+            <groupId>org.apache.hadoop</groupId>
+            <artifactId>hadoop-client-api</artifactId>
+            <version>${hadoop.three.version}</version>
+            <scope>provided</scope>
+          </dependency>
+          <dependency>
+            <groupId>org.apache.hadoop</groupId>
+            <artifactId>hadoop-client-runtime</artifactId>
+            <version>${hadoop.three.version}</version>
+            <scope>test</scope>
+          </dependency>
+          <dependency>
+            <groupId>org.apache.hadoop</groupId>
+            <artifactId>hadoop-common</artifactId>
+            <version>${hadoop.three.version}</version>
+            <classifier>tests</classifier>
+            <scope>test</scope>
+          </dependency>
+        </dependencies>
+      </dependencyManagement>
     </profile>
+
+    <profile>
+      <id>integration-test</id>
+      <build>
+        <plugins>
+          <plugin>
+            <artifactId>maven-surefire-plugin</artifactId>
+            <configuration>
+              <excludes>
+                <exclude>none</exclude>
+              </excludes>
+              <includes>
+                <include>**/*IntegrationTest.java</include>
+              </includes>
+              <reuseForks>false</reuseForks>
+              <forkCount>1C</forkCount>
+            </configuration>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+
     <profile>
       <id>release</id>
       <properties>
@@ -365,65 +451,6 @@
         <version>${slf4j.version}</version>
         <scope>test</scope>
       </dependency>
-
-      <!-- Hadoop 1 version specific dependencies -->
-      <!-- These should only be referenced from *-hadoop1 jars -->
-      <dependency>
-        <groupId>org.apache.hadoop</groupId>
-        <artifactId>hadoop-core</artifactId>
-        <version>${hadoop.one.version}</version>
-        <scope>provided</scope>
-      </dependency>
-      <dependency>
-        <groupId>org.apache.hadoop</groupId>
-        <artifactId>hadoop-test</artifactId>
-        <version>${hadoop.one.version}</version>
-        <scope>test</scope>
-      </dependency>
-
-      <!-- Hadoop 2 version specific dependencies -->
-      <!-- These should only be referenced from *-hadoop2 jars -->
-      <dependency>
-        <groupId>org.apache.hadoop</groupId>
-        <artifactId>hadoop-common</artifactId>
-        <version>${hadoop.two.version}</version>
-        <scope>provided</scope>
-      </dependency>
-      <dependency>
-        <groupId>org.apache.hadoop</groupId>
-        <artifactId>hadoop-common</artifactId>
-        <version>${hadoop.two.version}</version>
-        <classifier>tests</classifier>
-        <scope>test</scope>
-      </dependency>
-      <dependency>
-        <groupId>org.apache.hadoop</groupId>
-        <artifactId>hadoop-mapreduce-client-core</artifactId>
-        <version>${hadoop.two.version}</version>
-        <scope>provided</scope>
-      </dependency>
-
-      <!-- Hadoop 3 version specific dependencies -->
-      <!-- These should only be referenced from *-hadoop3 jars -->
-      <dependency>
-        <groupId>org.apache.hadoop</groupId>
-        <artifactId>hadoop-common</artifactId>
-        <version>${hadoop.three.version}</version>
-        <scope>provided</scope>
-      </dependency>
-      <dependency>
-        <groupId>org.apache.hadoop</groupId>
-        <artifactId>hadoop-common</artifactId>
-        <version>${hadoop.three.version}</version>
-        <classifier>tests</classifier>
-        <scope>test</scope>
-      </dependency>
-      <dependency>
-        <groupId>org.apache.hadoop</groupId>
-        <artifactId>hadoop-mapreduce-client-core</artifactId>
-        <version>${hadoop.three.version}</version>
-        <scope>provided</scope>
-      </dependency>
     </dependencies>
   </dependencyManagement>
   <build>
@@ -510,6 +537,13 @@
       </plugin>
       <plugin>
         <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <excludes>
+            <exclude>**/*IntegrationTest.java</exclude>
+          </excludes>
+          <reuseForks>false</reuseForks>
+          <forkCount>2</forkCount>
+        </configuration>
       </plugin>
       <plugin>
         <artifactId>maven-compiler-plugin</artifactId>
