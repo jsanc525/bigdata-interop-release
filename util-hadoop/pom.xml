@@ -29,7 +29,6 @@
   <name>util-hadoop-${hadoop.identifier}</name>
 
   <artifactId>util-hadoop</artifactId>
-  <version>${hadoop.identifier}-1.9.10</version>
 
   <profiles>
     <profile>

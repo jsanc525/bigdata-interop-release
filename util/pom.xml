@@ -27,7 +27,6 @@
   </parent>
 
   <artifactId>util</artifactId>
-  <version>1.9.10</version>
 
   <dependencies>
     <dependency>
