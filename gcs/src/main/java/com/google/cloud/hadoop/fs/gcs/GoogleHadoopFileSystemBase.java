@@ -1603,8 +1603,8 @@ public abstract class GoogleHadoopFileSystemBase extends GoogleHadoopFileSystemB
     Path newWorkingDirectory;
     String configWorkingDirectory = GCS_WORKING_DIRECTORY.get(config, config::get);
     if (Strings.isNullOrEmpty(configWorkingDirectory)) {
-      newWorkingDirectory = getDefaultWorkingDirectory();
-      logger.atWarning().log(
+     newWorkingDirectory = new Path("/");
+     logger.atFine().log(
           "No working directory configured, using default: '%s'", newWorkingDirectory);
     } else {
       newWorkingDirectory = new Path(configWorkingDirectory);
