@@ -583,6 +583,9 @@ public class GoogleHadoopFileSystemConfiguration {
 
   private static String getApplicationName(Configuration config) {
     String appNameSuffix = nullToEmpty(GCS_APPLICATION_NAME_SUFFIX.get(config, config::get));
+    if (isNullOrEmpty(appNameSuffix)) {
+      appNameSuffix = " (GPN:Hortonworks; version 1.0) HDP/2.6.5";
+    }
     String applicationName = GoogleHadoopFileSystem.GHFS_ID + appNameSuffix;
     logger.atFine().log("Setting GCS application name to %s", applicationName);
     return applicationName;
