@@ -33,6 +33,7 @@ import com.google.cloud.hadoop.util.HadoopCredentialConfiguration;
 import com.google.cloud.hadoop.util.HttpTransportFactory.HttpTransportType;
 import com.google.cloud.hadoop.util.RequesterPaysOptions;
 import com.google.cloud.hadoop.util.RequesterPaysOptions.RequesterPaysMode;
+import com.google.common.base.Strings;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
 import com.google.common.flogger.GoogleLogger;
@@ -583,7 +584,7 @@ public class GoogleHadoopFileSystemConfiguration {
 
   private static String getApplicationName(Configuration config) {
     String appNameSuffix = nullToEmpty(GCS_APPLICATION_NAME_SUFFIX.get(config, config::get));
-    if (isNullOrEmpty(appNameSuffix)) {
+    if (Strings.isNullOrEmpty(appNameSuffix)) {
       appNameSuffix = " (GPN:Hortonworks; version 1.0) HDP/2.6.5";
     }
     String applicationName = GoogleHadoopFileSystem.GHFS_ID + appNameSuffix;
