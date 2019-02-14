@@ -1,3 +1,4 @@
+Backport Add Hadoop File System extended attributes support.
 1.9.10 - 2018-11-01
 
   1. Use Hadoop `CredentialProvider` API to retrieve proxy credentials.
