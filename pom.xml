@@ -14,9 +14,7 @@
   See the License for the specific language governing permissions and
   limitations under the License.
 -->
-<project xmlns="http://maven.apache.org/POM/4.0.0"
-    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+<project xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://maven.apache.org/POM/4.0.0" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
   <modelVersion>4.0.0</modelVersion>
 
   <name>BigDataOSS Parent</name>
@@ -26,7 +24,7 @@
 
   <groupId>com.google.cloud.bigdataoss</groupId>
   <artifactId>bigdataoss-parent</artifactId>
-  <version>1.9.10</version>
+  <version>1.9.10.3.1.2.5-4</version>
   <packaging>pom</packaging>
 
   <url>https://github.com/GoogleCloudPlatform/BigData-interop/</url>
@@ -92,7 +90,7 @@
 
     <gpg.skip>true</gpg.skip>
 
-    <bigdataoss.version>1.9.10</bigdataoss.version>
+    <bigdataoss.version>1.9.10.3.1.2.5-4</bigdataoss.version>
 
     <!-- Keep in sync with Hadoop dependencies -->
     <apache.avro.version>1.7.7</apache.avro.version>
@@ -108,7 +106,7 @@
     <google.truth.version>0.42</google.truth.version>
     <hadoop.one.version>1.2.1</hadoop.one.version>
     <hadoop.two.version>2.9.1</hadoop.two.version>
-    <hadoop.three.version>3.1.1</hadoop.three.version>
+    <hadoop.three.version>3.1.1.3.1.2.0-27</hadoop.three.version>
     <junit.version>4.13-SNAPSHOT</junit.version>
     <mockito.version>2.23.0</mockito.version>
   </properties>
