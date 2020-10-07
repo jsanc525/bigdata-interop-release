@@ -28,7 +28,7 @@
 
   <packaging>jar</packaging>
   <artifactId>util-hadoop</artifactId>
-  <version>1.8.1-hadoop2</version>
+  <version>1.8.1.2.6.5.3032-3</version>
 
   <dependencies>
     <dependency>
